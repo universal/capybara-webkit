@@ -102,7 +102,6 @@ class Capybara::Driver::Webkit
       Process.kill("INT", @pid)
       @stdout_thread.exit
       @pipe.close
-      binding.pry
     end
 
     private
