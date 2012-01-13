@@ -98,6 +98,13 @@ class Capybara::Driver::Webkit
       command("GetCookies").lines.map{ |line| line.strip }.select{ |line| !line.empty? }
     end
 
+    def stop_server
+      Process.kill("INT", @pid)
+      @stdout_thread.exit
+      @pipe.close
+      binding.pry
+    end
+
     private
 
     def start_server
