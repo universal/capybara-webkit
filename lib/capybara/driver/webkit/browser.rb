@@ -102,6 +102,7 @@ class Capybara::Driver::Webkit
       Process.kill("INT", @pid)
       @stdout_thread.exit
       @pipe.close
+      @manually_closed = true
     end
 
     private
@@ -121,7 +122,7 @@ class Capybara::Driver::Webkit
 
       pipe, @pid = server_pipe_and_pid(server_path)
 
-      at_exit { Process.kill("INT", @pid) }
+      at_exit { Process.kill("INT", @pid) unless @manually_closed }
 
       pipe
     end
