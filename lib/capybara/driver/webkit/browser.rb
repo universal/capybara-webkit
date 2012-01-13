@@ -109,6 +109,7 @@ class Capybara::Driver::Webkit
 
     def start_server
       pipe = fork_server
+      @pipe = pipe
       @server_port = discover_server_port(pipe)
       @stdout_thread = Thread.new do
         Thread.current.abort_on_exception = true
