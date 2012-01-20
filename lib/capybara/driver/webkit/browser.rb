@@ -99,9 +99,17 @@ class Capybara::Driver::Webkit
     end
 
     def stop_server
+      Process.kill("KILL", @pid)
+      Process.kill("TERM", @pid)
       Process.kill("INT", @pid)
       @stdout_thread.exit
-      @pipe.close
+      Process.waitpid(@pid)
+      begin
+        @pipe.close
+      rescue Exception => e
+        puts "error closing pipe: #{e}"
+      end
+      
       @manually_closed = true
     end
 
