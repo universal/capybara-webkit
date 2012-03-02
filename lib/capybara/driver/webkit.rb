@@ -1,7 +1,9 @@
 require "capybara"
+require "capybara/driver/webkit/version"
 require "capybara/driver/webkit/node"
 require "capybara/driver/webkit/browser"
 require "capybara/driver/webkit/socket_debugger"
+require "capybara/driver/webkit/cookie_jar"
 
 class Capybara::Driver::Webkit
   class WebkitInvalidResponseError < StandardError
@@ -20,11 +22,16 @@ class Capybara::Driver::Webkit
     @options = options
     @rack_server = Capybara::Server.new(@app)
     @rack_server.boot if Capybara.run_server
-    @browser = options[:browser] || Browser.new
+    @browser = options[:browser] || Browser.new(
+      :ignore_ssl_errors => options[:ignore_ssl_errors])
   end
 
   def current_url
-    browser.url
+    browser.current_url
+  end
+
+  def requested_url
+    browser.requested_url
   end
 
   def visit(path)
@@ -54,6 +61,14 @@ class Capybara::Driver::Webkit
 
   def evaluate_script(script)
     browser.evaluate_script script
+  end
+
+  def console_messages
+    browser.console_messages
+  end
+
+  def error_messages
+    browser.error_messages
   end
 
   def response_headers
@@ -101,6 +116,10 @@ class Capybara::Driver::Webkit
 
   def server_port
     @rack_server.port
+  end
+
+  def cookies
+    @cookie_jar ||= CookieJar.new(browser)
   end
 
   private

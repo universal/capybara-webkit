@@ -1,5 +1,9 @@
 class Capybara::Driver::Webkit
   class Node < Capybara::Driver::Node
+
+    class ElementNotDisplayedError < StandardError
+    end
+
     NBSP = "\xC2\xA0"
     NBSP.force_encoding("UTF-8") if NBSP.respond_to?(:force_encoding)
 
@@ -18,11 +22,7 @@ class Capybara::Driver::Webkit
 
     def value
       if multiple_select?
-        self.find(".//option").select do |option|
-          option["selected"] == "selected"
-        end.map do |option|
-          option.value
-        end
+        self.find(".//option").select(&:selected?).map(&:value)
       else
         invoke "value"
       end
@@ -33,6 +33,7 @@ class Capybara::Driver::Webkit
     end
 
     def select_option
+      check_visibility(self)
       invoke "selectOption"
     end
 
@@ -46,10 +47,13 @@ class Capybara::Driver::Webkit
     end
 
     def click
+      check_visibility(self)
       invoke "click"
     end
 
     def drag_to(element)
+      check_visibility(self)
+      check_visibility(element)
       invoke 'dragTo', element.native
     end
 
@@ -74,7 +78,11 @@ class Capybara::Driver::Webkit
     end
 
     def path
-      raise Capybara::NotSupportedByDriverError
+      invoke "path"
+    end
+
+    def submit(opts = {})
+      invoke "submit"
     end
 
     def trigger(event)
@@ -113,6 +121,10 @@ class Capybara::Driver::Webkit
 
     def multiple_select?
       self.tag_name == "select" && self["multiple"] == "multiple"
+    end
+
+    def check_visibility(element)
+      raise(ElementNotDisplayedError, "This element is not visible so it may not be interacted with") unless element.visible?
     end
   end
 end

@@ -56,11 +56,61 @@ Capybara = {
     }
   },
 
+  path: function(index) {
+    return "/" + this.getXPathNode(this.nodes[index]).join("/");
+  },
+
+  getXPathNode: function(node, path) {
+    path = path || [];
+    if (node.parentNode) {
+      path = this.getXPathNode(node.parentNode, path);
+    }
+
+    var first = node;
+    while (first.previousSibling)
+      first = first.previousSibling;
+
+    var count = 0;
+    var index = 0;
+    var iter = first;
+    while (iter) {
+      if (iter.nodeType == 1 && iter.nodeName == node.nodeName)
+        count++;
+      if (iter.isSameNode(node))
+         index = count;
+      iter = iter.nextSibling;
+      continue;
+    }
+
+    if (node.nodeType == 1)
+      path.push(node.nodeName.toLowerCase() + (node.id ? "[@id='"+node.id+"']" : count > 1 ? "["+index+"]" : ''));
+
+    return path;
+  },
+
   tagName: function(index) {
     return this.nodes[index].tagName.toLowerCase();
   },
 
+  submit: function(index) {
+    return this.nodes[index].submit();
+  },
+
+  mousedown: function(index) {
+    var mousedownEvent = document.createEvent('MouseEvents');
+    mousedownEvent.initMouseEvent('mousedown', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+    this.nodes[index].dispatchEvent(mousedownEvent);
+  },
+
+  mouseup: function(index) {
+    var mouseupEvent = document.createEvent('MouseEvents');
+    mouseupEvent.initMouseEvent('mouseup', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+    this.nodes[index].dispatchEvent(mouseupEvent);
+  },
+
   click: function (index) {
+    this.mousedown(index);
+    this.mouseup(index);
     var clickEvent = document.createEvent('MouseEvents');
     clickEvent.initMouseEvent('click', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
     this.nodes[index].dispatchEvent(clickEvent);
@@ -103,21 +153,25 @@ Capybara = {
     return this.nodes[index].value;
   },
 
-  set: function(index, value) {
-    var node = this.nodes[index];
-    var type = (node.type || node.tagName).toLowerCase();
-    if (type == "text" || type == "textarea" || type == "password") {
+  set: function (index, value) {
+    var length, maxLength, node, strindex, textTypes, type;
+
+    node = this.nodes[index];
+    type = (node.type || node.tagName).toLowerCase();
+    textTypes = ["email", "number", "password", "search", "tel", "text", "textarea", "url"];
+
+    if (textTypes.indexOf(type) != -1) {
       this.trigger(index, "focus");
-      node.value = "";
-      var maxLength = this.attribute(index, "maxlength"),
-          length;
+
+      maxLength = this.attribute(index, "maxlength");
       if (maxLength && value.length > maxLength) {
         length = maxLength;
       } else {
         length = value.length;
       }
 
-      for(var strindex = 0; strindex < length; strindex++) {
+      node.value = "";
+      for (strindex = 0; strindex < length; strindex++) {
         node.value += value[strindex];
         this.trigger(index, "keydown");
         this.keypress(index, false, false, false, false, 0, value[strindex]);
@@ -125,13 +179,16 @@ Capybara = {
       }
       this.trigger(index, "change");
       this.trigger(index, "blur");
-    } else if(type == "checkbox" || type == "radio") {
-      node.checked = (value == "true");
-      this.trigger(index, "click");
-      this.trigger(index, "change");
-    } else if(type == "file") {
+
+    } else if (type === "checkbox" || type === "radio") {
+      if (node.checked != (value === "true")) {
+        this.click(index)
+      }
+
+    } else if (type === "file") {
       this.lastAttachedFile = value;
-      this.trigger(index, "click");
+      this.click(index)
+
     } else {
       node.value = value;
     }
@@ -139,13 +196,11 @@ Capybara = {
 
   selectOption: function(index) {
     this.nodes[index].selected = true;
-    this.nodes[index].setAttribute("selected", "selected");
     this.trigger(index, "change");
   },
 
   unselectOption: function(index) {
     this.nodes[index].selected = false;
-    this.nodes[index].removeAttribute("selected");
     this.trigger(index, "change");
   },
 

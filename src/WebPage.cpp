@@ -20,6 +20,7 @@ WebPage::WebPage(QObject *parent) : QWebPage(parent) {
           this, SLOT(frameCreated(QWebFrame *)));
   connect(this, SIGNAL(unsupportedContent(QNetworkReply*)),
       this, SLOT(handleUnsupportedContent(QNetworkReply*)));
+  this->setViewportSize(QSize(1680, 1050));
 }
 
 void WebPage::setCustomNetworkAccessManager() {
@@ -27,6 +28,7 @@ void WebPage::setCustomNetworkAccessManager() {
   manager->setCookieJar(new NetworkCookieJar());
   this->setNetworkAccessManager(manager);
   connect(manager, SIGNAL(finished(QNetworkReply *)), this, SLOT(replyFinished(QNetworkReply *)));
+  connect(manager, SIGNAL(sslErrors(QNetworkReply *, QList<QSslError>)), this, SLOT(ignoreSslErrors(QNetworkReply *, QList<QSslError>)));
 }
 
 void WebPage::loadJavascript() {
@@ -54,6 +56,10 @@ QString WebPage::userAgentForUrl(const QUrl &url ) const {
   } else {
     return QWebPage::userAgentForUrl(url);
   }
+}
+
+QString WebPage::consoleMessages() {
+  return m_consoleMessages.join("\n");
 }
 
 void WebPage::setUserAgent(QString userAgent) {
@@ -88,9 +94,11 @@ QVariant WebPage::invokeCapybaraFunction(QString &name, QStringList &arguments) 
 }
 
 void WebPage::javaScriptConsoleMessage(const QString &message, int lineNumber, const QString &sourceID) {
+  QString fullMessage = QString::number(lineNumber) + "|" + message;
   if (!sourceID.isEmpty())
-    std::cout << qPrintable(sourceID) << ":" << lineNumber << " ";
-  std::cout << qPrintable(message) << std::endl;
+    fullMessage = sourceID + "|" + fullMessage;
+  m_consoleMessages.append(fullMessage);
+  std::cout << qPrintable(fullMessage) << std::endl;
 }
 
 void WebPage::javaScriptAlert(QWebFrame *frame, const QString &message) {
@@ -192,6 +200,20 @@ void WebPage::replyFinished(QNetworkReply *reply) {
   }
 }
 
+void WebPage::ignoreSslErrors(QNetworkReply *reply, const QList<QSslError> &errors) {
+  if (m_ignoreSslErrors)
+    reply->ignoreSslErrors(errors);
+}
+
+void WebPage::setIgnoreSslErrors(bool ignore) {
+  m_ignoreSslErrors = ignore;
+}
+
+bool WebPage::ignoreSslErrors() {
+  return m_ignoreSslErrors;
+}
+
+
 int WebPage::getLastStatus() {
   return m_lastStatus;
 }
@@ -199,6 +221,10 @@ int WebPage::getLastStatus() {
 void WebPage::resetResponseHeaders() {
   m_lastStatus = 0;
   m_pageHeaders = QString();
+}
+
+void WebPage::resetConsoleMessages() {
+  m_consoleMessages.clear();
 }
 
 QString WebPage::pageHeaders() {

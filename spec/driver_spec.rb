@@ -20,7 +20,7 @@ describe Capybara::Driver::Webkit do
           p_id = "greeting"
           msg  = "hello"
           iframe = "<iframe id=\"f\" src=\"/?iframe=true\"></iframe>"
-        end 
+        end
         body = <<-HTML
           <html>
             <head>
@@ -132,6 +132,20 @@ describe Capybara::Driver::Webkit do
       subject.find("//input").first.click
       subject.find("//p").first.text.should == ""
     end
+
+    it "returns the current URL when changed by pushState after a redirect" do
+      subject.visit("/redirect-me")
+      port = subject.instance_variable_get("@rack_server").port
+      subject.execute_script("window.history.pushState({}, '', '/pushed-after-redirect')")
+      subject.current_url.should == "http://127.0.0.1:#{port}/pushed-after-redirect"
+    end
+
+    it "returns the current URL when changed by replaceState after a redirect" do
+      subject.visit("/redirect-me")
+      port = subject.instance_variable_get("@rack_server").port
+      subject.execute_script("window.history.replaceState({}, '', '/replaced-after-redirect')")
+      subject.current_url.should == "http://127.0.0.1:#{port}/replaced-after-redirect"
+    end
   end
 
   context "css app" do
@@ -140,11 +154,15 @@ describe Capybara::Driver::Webkit do
       @app = lambda do |env|
         [200, {"Content-Type" => "text/css", "Content-Length" => body.length.to_s}, [body]]
       end
+      subject.visit("/")
     end
 
     it "renders unsupported content types gracefully" do
-      subject.visit("/")
       subject.body.should =~ /css/
+    end
+
+    it "sets the response headers with respect to the unsupported request" do
+      subject.response_headers["Content-Type"].should == "text/css"
     end
   end
 
@@ -193,6 +211,11 @@ describe Capybara::Driver::Webkit do
       subject.find("//*[contains(., 'hello')]").should be_empty
     end
 
+    it "has a location of 'about:blank' after reseting" do
+      subject.reset!
+      subject.current_url.should == "about:blank"
+    end
+
     it "raises an error for an invalid xpath query" do
       expect { subject.find("totally invalid salad") }.
         to raise_error(Capybara::Driver::Webkit::WebkitInvalidResponseError, /xpath/i)
@@ -219,9 +242,21 @@ describe Capybara::Driver::Webkit do
       subject.current_url.should == "http://127.0.0.1:#{port}/hello/world?success=true"
     end
 
-    it "escapes URLs" do
-      subject.visit("/hello there")
-      subject.current_url.should =~ /hello%20there/
+    it "returns the current URL when changed by pushState" do
+      port = subject.instance_variable_get("@rack_server").port
+      subject.execute_script("window.history.pushState({}, '', '/pushed')")
+      subject.current_url.should == "http://127.0.0.1:#{port}/pushed"
+    end
+
+    it "returns the current URL when changed by replaceState" do
+      port = subject.instance_variable_get("@rack_server").port
+      subject.execute_script("window.history.replaceState({}, '', '/replaced')")
+      subject.current_url.should == "http://127.0.0.1:#{port}/replaced"
+    end
+
+    it "does not double-encode URLs" do
+      subject.visit("/hello/world?success=%25true")
+      subject.current_url.should =~ /success=\%25true/
     end
 
     it "visits a page with an anchor" do
@@ -316,6 +351,40 @@ describe Capybara::Driver::Webkit do
     end
   end
 
+  context "console messages app" do
+
+    before(:all) do
+      @app = lambda do |env|
+        body = <<-HTML
+          <html>
+            <head>
+            </head>
+            <body>
+              <script type="text/javascript">
+                console.log("hello");
+                console.log("hello again");
+                oops
+              </script>
+            </body>
+          </html>
+        HTML
+        [200,
+          { 'Content-Type' => 'text/html', 'Content-Length' => body.length.to_s },
+          [body]]
+      end
+    end
+
+    it "collects messages logged to the console" do
+      subject.console_messages.first.should include :source, :message => "hello", :line_number => 6
+      subject.console_messages.length.should eq 3
+    end
+
+    it "logs errors to the console" do
+      subject.error_messages.length.should eq 1
+    end
+
+  end
+
   context "form app" do
     before(:all) do
       @app = lambda do |env|
@@ -342,6 +411,7 @@ describe Capybara::Driver::Webkit do
               </select>
               <textarea id="only-textarea">what a wonderful area for text</textarea>
               <input type="radio" id="only-radio" value="1"/>
+              <button type="reset">Reset Form</button>
             </form>
           </body></html>
         HTML
@@ -412,18 +482,45 @@ describe Capybara::Driver::Webkit do
     let(:banana_option)   { subject.find("//option[@id='topping-banana']").first }
     let(:cherry_option)   { subject.find("//option[@id='topping-cherry']").first }
     let(:toppings_select) { subject.find("//select[@name='toppings']").first }
+    let(:reset_button)    { subject.find("//button[@type='reset']").first }
 
-    it "selects an option" do
-      animal_select.value.should == "Capybara"
-      monkey_option.select_option
-      animal_select.value.should == "Monkey"
+    context "a select element's selection has been changed" do
+      before do
+        animal_select.value.should == "Capybara"
+        monkey_option.select_option
+      end
+
+      it "returns the new selection" do
+        animal_select.value.should == "Monkey"
+      end
+
+      it "does not modify the selected attribute of a new selection" do
+        monkey_option['selected'].should be_empty
+      end
+
+      it "returns the old value when a reset button is clicked" do
+        reset_button.click
+
+        animal_select.value.should == "Capybara"
+      end
     end
 
-    it "unselects an option in a multi-select" do
-      toppings_select.value.should include("Apple", "Banana", "Cherry")
+    context "a multi-select element's option has been unselected" do
+      before do
+        toppings_select.value.should include("Apple", "Banana", "Cherry")
 
-      apple_option.unselect_option
-      toppings_select.value.should_not include("Apple")
+        apple_option.unselect_option
+      end
+
+      it "does not return the deselected option" do
+        toppings_select.value.should_not include("Apple")
+      end
+
+      it "returns the deselected option when a reset button is clicked" do
+        reset_button.click
+
+        toppings_select.value.should include("Apple", "Banana", "Cherry")
+      end
     end
 
     it "reselects an option in a multi-select" do
@@ -491,14 +588,57 @@ describe Capybara::Driver::Webkit do
     end
   end
 
+  context "dom events" do
+    before(:all) do
+      @app = lambda do |env|
+        body = <<-HTML
+
+          <html><body>
+            <a href='#' class='watch'>Link</a>
+            <ul id="events"></ul>
+            <script type="text/javascript">
+              var events = document.getElementById("events");
+              var recordEvent = function (event) {
+                var element = document.createElement("li");
+                element.innerHTML = event.type;
+                events.appendChild(element);
+              };
+
+              var elements = document.getElementsByClassName("watch");
+              for (var i = 0; i < elements.length; i++) {
+                var element = elements[i];
+                element.addEventListener("mousedown", recordEvent);
+                element.addEventListener("mouseup", recordEvent);
+                element.addEventListener("click", recordEvent);
+              }
+            </script>
+          </body></html>
+        HTML
+        [200,
+          { 'Content-Type' => 'text/html', 'Content-Length' => body.length.to_s },
+          [body]]
+      end
+    end
+
+    it "triggers mouse events" do
+      subject.find("//a").first.click
+      subject.find("//li").map(&:text).should == %w(mousedown mouseup click)
+    end
+  end
+
   context "form events app" do
     before(:all) do
       @app = lambda do |env|
         body = <<-HTML
           <html><body>
             <form action="/" method="GET">
-              <input class="watch" type="text"/>
+              <input class="watch" type="email"/>
+              <input class="watch" type="number"/>
               <input class="watch" type="password"/>
+              <input class="watch" type="search"/>
+              <input class="watch" type="tel"/>
+              <input class="watch" type="text"/>
+              <input class="watch" type="url"/>
               <textarea class="watch"></textarea>
               <input class="watch" type="checkbox"/>
               <input class="watch" type="radio"/>
@@ -521,6 +661,8 @@ describe Capybara::Driver::Webkit do
                 element.addEventListener("keyup", recordEvent);
                 element.addEventListener("change", recordEvent);
                 element.addEventListener("blur", recordEvent);
+                element.addEventListener("mousedown", recordEvent);
+                element.addEventListener("mouseup", recordEvent);
                 element.addEventListener("click", recordEvent);
               }
             </script>
@@ -540,9 +682,11 @@ describe Capybara::Driver::Webkit do
        %w{change blur}).flatten
     end
 
-    it "triggers text input events" do
-      subject.find("//input[@type='text']").first.set(newtext)
-      subject.find("//li").map(&:text).should == keyevents
+    %w(email number password search tel text url).each do | field_type |
+      it "triggers text input events on inputs of type #{field_type}" do
+        subject.find("//input[@type='#{field_type}']").first.set(newtext)
+        subject.find("//li").map(&:text).should == keyevents
+      end
     end
 
     it "triggers textarea input events" do
@@ -550,19 +694,14 @@ describe Capybara::Driver::Webkit do
       subject.find("//li").map(&:text).should == keyevents
     end
 
-    it "triggers password input events" do
-      subject.find("//input[@type='password']").first.set(newtext)
-      subject.find("//li").map(&:text).should == keyevents
-    end
-
     it "triggers radio input events" do
       subject.find("//input[@type='radio']").first.set(true)
-      subject.find("//li").map(&:text).should == %w(click change)
+      subject.find("//li").map(&:text).should == %w(mousedown mouseup change click)
     end
 
     it "triggers checkbox events" do
       subject.find("//input[@type='checkbox']").first.set(true)
-      subject.find("//li").map(&:text).should == %w(click change)
+      subject.find("//li").map(&:text).should == %w(mousedown mouseup change click)
     end
   end
 
@@ -574,10 +713,13 @@ describe Capybara::Driver::Webkit do
             <div id="change">Change me</div>
             <div id="mouseup">Push me</div>
             <div id="mousedown">Release me</div>
+            <div id="invisible-mouseup" style="display:none;">You can't push me</div>
+            <div id="invisible-mousedown" style="display:none;">You can't release me</div>
             <form action="/" method="GET">
               <select id="change_select" name="change_select">
                 <option value="1" id="option-1" selected="selected">one</option>
                 <option value="2" id="option-2">two</option>
+                <option value="2" id="invisible-option" style="display:none;">three</option>
               </select>
             </form>
             <script type="text/javascript">
@@ -599,6 +741,7 @@ describe Capybara::Driver::Webkit do
                 });
             </script>
             <a href="/next">Next</a>
+            <a href="/next" id="hidden" style="display:none;">Not displayed</a>
           </body></html>
         HTML
         [200,
@@ -607,7 +750,7 @@ describe Capybara::Driver::Webkit do
       end
     end
 
-    it "clicks an element" do
+    it "clicks a visible element" do
       subject.find("//a").first.click
       subject.current_url =~ %r{/next$}
     end
@@ -639,6 +782,39 @@ describe Capybara::Driver::Webkit do
 
       subject.find("//*[@class='triggered']").size.should == 1
     end
+
+    context "raises error when" do
+      it "tries to click an invisible element" do
+        expect {
+          subject.find("//*[@id='hidden']").first.click
+        }.to raise_error(Capybara::Driver::Webkit::Node::ElementNotDisplayedError)
+      end
+
+      it "tries to drag an invisible element to a visible one" do
+        draggable = subject.find("//*[@id='invisible-mousedown']").first
+        container = subject.find("//*[@id='mouseup']").first
+
+        expect {
+          draggable.drag_to(container)
+        }.to raise_error(Capybara::Driver::Webkit::Node::ElementNotDisplayedError)
+      end
+
+      it "tries to drag a visible element to an invisible one" do
+        draggable = subject.find("//*[@id='mousedown']").first
+        container = subject.find("//*[@id='invisible-mouseup']").first
+
+        expect {
+          draggable.drag_to(container)
+        }.to raise_error(Capybara::Driver::Webkit::Node::ElementNotDisplayedError)
+      end
+
+      it "tries to select an invisible option" do
+        option = subject.find("//option[@id='invisible-option']").first
+        expect {
+          option.select_option
+        }.to raise_error(Capybara::Driver::Webkit::Node::ElementNotDisplayedError)
+      end
+    end
   end
 
   context "nesting app" do
@@ -666,14 +842,13 @@ describe Capybara::Driver::Webkit do
 
   context "slow app" do
     before(:all) do
+      @result = ""
       @app = lambda do |env|
-        body = <<-HTML
-          <html><body>
-            <form action="/next"><input type="submit"/></form>
-            <p>#{env['PATH_INFO']}</p>
-          </body></html>
-        HTML
-        sleep(0.5)
+        if env["PATH_INFO"] == "/result"
+          sleep(0.5)
+          @result << "finished"
+        end
+        body = %{<html><body><a href="/result">Go</a></body></html>}
         [200,
           { 'Content-Type' => 'text/html', 'Content-Length' => body.length.to_s },
           [body]]
@@ -681,8 +856,8 @@ describe Capybara::Driver::Webkit do
     end
 
     it "waits for a request to load" do
-      subject.find("//input").first.click
-      subject.find("//p").first.text.should == "/next"
+      subject.find("//a").first.click
+      @result.should == "finished"
     end
   end
 
@@ -838,7 +1013,7 @@ describe Capybara::Driver::Webkit do
           [body]]
       end
     end
-    
+
     it "raises a webkit error for the requested url" do
       make_the_server_go_away
       expect {
@@ -853,7 +1028,7 @@ describe Capybara::Driver::Webkit do
       subject.browser.instance_variable_get(:@socket).unstub!(:puts)
       subject.browser.instance_variable_get(:@socket).unstub!(:print)
     end
- 
+
     def make_the_server_go_away
       subject.browser.instance_variable_get(:@socket).stub!(:gets).and_return(nil)
       subject.browser.instance_variable_get(:@socket).stub!(:puts)
@@ -943,6 +1118,10 @@ describe Capybara::Driver::Webkit do
       cookie["domain"].should include "127.0.0.1"
       cookie["path"].should == "/"
     end
+
+    it "allows reading access to cookies using a nice syntax" do
+      subject.cookies["cookie"].should == "abc"
+    end
   end
 
   context "with socket debugger" do
@@ -1014,6 +1193,98 @@ describe Capybara::Driver::Webkit do
     end
   end
 
+  context "app with a lot of HTML tags" do
+    before(:all) do
+      @app = lambda do |env|
+        body = <<-HTML
+          <html>
+            <head>
+              <title>My eBook</title>
+              <meta class="charset" name="charset" value="utf-8" />
+              <meta class="author" name="author" value="Firstname Lastname" />
+            </head>
+            <body>
+              <div id="toc">
+                <table>
+                  <thead id="head">
+                    <tr><td class="td1">Chapter</td><td>Page</td></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Intro</td><td>1</td></tr>
+                    <tr><td>Chapter 1</td><td class="td2">1</td></tr>
+                    <tr><td>Chapter 2</td><td>1</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h1 class="h1">My first book</h1>
+              <p class="p1">Written by me</p>
+              <div id="intro" class="intro">
+                <p>Let's try out XPath</p>
+                <p class="p2">in capybara-webkit</p>
+              </div>
+
+              <h2 class="chapter1">Chapter 1</h2>
+              <p>This paragraph is fascinating.</p>
+              <p class="p3">But not as much as this one.</p>
+
+              <h2 class="chapter2">Chapter 2</h2>
+              <p>Let's try if we can select this</p>
+            </body>
+          </html>
+        HTML
+        [200,
+          { 'Content-Type' => 'text/html', 'Content-Length' => body.length.to_s },
+          [body]]
+      end
+    end
+
+    it "builds up node paths correctly" do
+      cases = {
+        "//*[contains(@class, 'author')]"    => "/html/head/meta[2]",
+        "//*[contains(@class, 'td1')]"       => "/html/body/div[@id='toc']/table/thead[@id='head']/tr/td[1]",
+        "//*[contains(@class, 'td2')]"       => "/html/body/div[@id='toc']/table/tbody/tr[2]/td[2]",
+        "//h1"                               => "/html/body/h1",
+        "//*[contains(@class, 'chapter2')]"  => "/html/body/h2[2]",
+        "//*[contains(@class, 'p1')]"        => "/html/body/p[1]",
+        "//*[contains(@class, 'p2')]"        => "/html/body/div[@id='intro']/p[2]",
+        "//*[contains(@class, 'p3')]"        => "/html/body/p[3]",
+      }
+
+      cases.each do |xpath, path|
+        nodes = subject.find(xpath)
+        nodes.size.should == 1
+        nodes[0].path.should == path
+      end
+    end
+  end
+
+  context "css overflow app" do
+    before(:all) do
+      @app = lambda do |env|
+        body = <<-HTML
+          <html>
+            <head>
+              <style type="text/css">
+                #overflow { overflow: hidden }
+              </style>
+            </head>
+            <body>
+              <div id="overflow">Overflow</div>
+            </body>
+          </html>
+        HTML
+        [200,
+          { 'Content-Type' => 'text/html', 'Content-Length' => body.length.to_s },
+          [body]]
+      end
+    end
+
+    it "handles overflow hidden" do
+      subject.find("//div[@id='overflow']").first.text.should == "Overflow"
+    end
+  end
+
   context "javascript redirect app" do
     before(:all) do
       @app = lambda do |env|
@@ -1039,6 +1310,102 @@ describe Capybara::Driver::Webkit do
         subject.visit("/redirect")
         subject.find("//p").first.text.should == "finished"
       end
+    end
+  end
+
+  context "app with a lot of HTML tags" do
+    before(:all) do
+      @app = lambda do |env|
+        body = <<-HTML
+          <html>
+            <head>
+              <title>My eBook</title>
+              <meta class="charset" name="charset" value="utf-8" />
+              <meta class="author" name="author" value="Firstname Lastname" />
+            </head>
+            <body>
+              <div id="toc">
+                <table>
+                  <thead id="head">
+                    <tr><td class="td1">Chapter</td><td>Page</td></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Intro</td><td>1</td></tr>
+                    <tr><td>Chapter 1</td><td class="td2">1</td></tr>
+                    <tr><td>Chapter 2</td><td>1</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h1 class="h1">My first book</h1>
+              <p class="p1">Written by me</p>
+              <div id="intro" class="intro">
+                <p>Let's try out XPath</p>
+                <p class="p2">in capybara-webkit</p>
+              </div>
+
+              <h2 class="chapter1">Chapter 1</h2>
+              <p>This paragraph is fascinating.</p>
+              <p class="p3">But not as much as this one.</p>
+
+              <h2 class="chapter2">Chapter 2</h2>
+              <p>Let's try if we can select this</p>
+            </body>
+          </html>
+        HTML
+        [200,
+          { 'Content-Type' => 'text/html', 'Content-Length' => body.length.to_s },
+          [body]]
+      end
+    end
+
+    it "builds up node paths correctly" do
+      cases = {
+        "//*[contains(@class, 'author')]"    => "/html/head/meta[2]",
+        "//*[contains(@class, 'td1')]"       => "/html/body/div[@id='toc']/table/thead[@id='head']/tr/td[1]",
+        "//*[contains(@class, 'td2')]"       => "/html/body/div[@id='toc']/table/tbody/tr[2]/td[2]",
+        "//h1"                               => "/html/body/h1",
+        "//*[contains(@class, 'chapter2')]"  => "/html/body/h2[2]",
+        "//*[contains(@class, 'p1')]"        => "/html/body/p[1]",
+        "//*[contains(@class, 'p2')]"        => "/html/body/div[@id='intro']/p[2]",
+        "//*[contains(@class, 'p3')]"        => "/html/body/p[3]",
+      }
+
+      cases.each do |xpath, path|
+        nodes = subject.find(xpath)
+        nodes.size.should == 1
+        nodes[0].path.should == path
+      end
+    end
+  end
+
+  context "form app with server-side handler" do
+    before(:all) do
+      @app = lambda do |env|
+        if env["REQUEST_METHOD"] == "POST"
+          body = "<html><body><p>Congrats!</p></body></html>"
+        else
+          body = <<-HTML
+            <html>
+              <head><title>Form</title>
+              <body>
+                <form action="/" method="POST">
+                  <input type="hidden" name="abc" value="123" />
+                  <input type="submit" value="Submit" />
+                </form>
+              </body>
+            </html>
+          HTML
+        end
+        [200,
+          { 'Content-Type' => 'text/html', 'Content-Length' => body.length.to_s },
+          [body]]
+      end
+    end
+
+    it "submits a form without clicking" do
+      subject.find("//form")[0].submit
+      subject.body.should include "Congrats"
     end
   end
 end

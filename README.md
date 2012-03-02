@@ -15,10 +15,12 @@ Reporting Issues
 ----------------
 
 Without access to your application code we can't easily debug most crashes or
-generic failures, so we've included a debug vesion of the driver that prints a
+generic failures, so we've included a debug version of the driver that prints a
 log of what happened during each test. Before filing a crash bug, please see
 [Reporting Crashes](https://github.com/thoughtbot/capybara-webkit/wiki/Reporting-Crashes).
 You're much more likely to get a fix if you follow those instructions.
+
+If you are having compiling issues please post to the [mailing list](http://groups.google.com/group/capybara-webkit).
 
 CI
 --
@@ -38,7 +40,11 @@ Set your Capybara Javascript driver to webkit:
 
     Capybara.javascript_driver = :webkit
 
-Tag scenarios with @javascript to run them using a headless WebKit browser.
+In cucumber, tag scenarios with @javascript to run them using a headless WebKit browser.
+
+In RSpec, use the :js => true flag.
+
+Take note of the transactional fixtures section of the [capybara README](https://github.com/jnicklas/capybara/blob/master/README.md).
 
 Contributing
 ------------
@@ -48,18 +54,13 @@ See the CONTRIBUTING document.
 About
 -----
 
-The capybara WebKit driver was written by Joe Ferris, Tristan Dunn, and Jason Morrison from [thoughtbot, inc](http://thoughtbot.com/community).
+The capybara WebKit driver is maintained by Joe Ferris and Matt Mongeau. It was written by [thoughtbot, inc](http://thoughtbot.com/community) with the help of numerous [contributions from the open source community](https://github.com/thoughtbot/capybara-webkit/contributors).
 
 Code for rendering the current webpage to a PNG is borrowed from Phantom.js' implementation.
 
 ![thoughtbot](http://thoughtbot.com/images/tm/logo.png)
 
 The names and logos for thoughtbot are trademarks of thoughtbot, inc.
-
-Notes
------
-
-capybara-webkit will listen on port 8200. This may conflict with other services.
 
 License
 -------

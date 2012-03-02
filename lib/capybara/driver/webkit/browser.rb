@@ -12,6 +12,7 @@ class Capybara::Driver::Webkit
       @stdout       = options.has_key?(:stdout) ?
                         options[:stdout] :
                         $stdout
+      @ignore_ssl_errors = options[:ignore_ssl_errors]
       start_server
       connect
     end
@@ -44,12 +45,33 @@ class Capybara::Driver::Webkit
       command("Status").to_i
     end
 
+    def console_messages
+      command("ConsoleMessages").split("\n").map do |messages|
+        parts = messages.split("|", 3)
+        { :source => parts.first, :line_number => Integer(parts[1]), :message => parts.last }
+      end
+    end
+
+    def error_messages
+      console_messages.select do |message|
+        message[:message] =~ /Error:/
+      end
+    end
+
     def response_headers
       Hash[command("Headers").split("\n").map { |header| header.split(": ") }]
     end
 
     def url
       command("Url")
+    end
+
+    def requested_url
+      command("RequestedUrl")
+    end
+
+    def current_url
+      command("CurrentUrl")
     end
 
     def frame_focus(frame_id_or_index=nil)
@@ -98,6 +120,15 @@ class Capybara::Driver::Webkit
       command("GetCookies").lines.map{ |line| line.strip }.select{ |line| !line.empty? }
     end
 
+    def set_proxy(options = {})
+      options = default_proxy_options.merge(options)
+      command("SetProxy", options[:host], options[:port], options[:user], options[:pass])
+    end
+
+    def clear_proxy
+      command("SetProxy")
+    end
+
     def stop_server
       Process.kill("KILL", @pid)
       Process.kill("TERM", @pid)
@@ -127,16 +158,26 @@ class Capybara::Driver::Webkit
 
     def fork_server
       server_path = File.expand_path("../../../../../bin/webkit_server", __FILE__)
-
       pipe, @pid = server_pipe_and_pid(server_path)
-
-      at_exit { Process.kill("INT", @pid) unless @manually_closed }
-
+      register_shutdown_hook
       pipe
     end
 
+    def register_shutdown_hook
+      @owner_pid = Process.pid
+      at_exit do
+        unless @manually_closed
+          if Process.pid == @owner_pid
+            Process.kill("INT", @pid)
+          end
+        end
+      end
+    end
+
     def server_pipe_and_pid(server_path)
-      pipe = IO.popen(server_path)
+      cmdline = [server_path]
+      cmdline << "--ignore-ssl-errors" if @ignore_ssl_errors
+      pipe = IO.popen(cmdline.join(" "))
       [pipe, pipe.pid]
     end
 
@@ -200,6 +241,15 @@ class Capybara::Driver::Webkit
       response = @socket.read(response_length)
       response.force_encoding("UTF-8") if response.respond_to?(:force_encoding)
       response
+    end
+
+    def default_proxy_options
+      {
+        :host => "localhost",
+        :port => "0",
+        :user => "",
+        :pass => ""
+      }
     end
   end
 end
